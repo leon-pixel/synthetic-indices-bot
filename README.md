@@ -42,8 +42,21 @@ Replace `YOUR_USERNAME` after you fork or create the GitHub repo. Full steps: **
 | Walk-forward + RSI grid | add `--walk-forward 4` |
 | Stress (late signals) | add `--latency-bars 2` |
 | Paper stream (needs token) | `python3 -m sidx.bot.run_paper --log logs/paper.jsonl` |
+| Paper stream + Telegram | `python3 -m sidx.bot.run_paper --log logs/paper.jsonl --telegram` |
+| Local live dashboard | `python3 -m sidx.monitor.dashboard --log logs/paper.jsonl --port 8765` |
 
 If you skip `pip install -e .`, prefix with `PYTHONPATH=.` (see GETTING_STARTED).
+
+## Phase 1 monitoring (concrete)
+
+1. Start paper loop (terminal A):
+   - `python3 -m sidx.bot.run_paper --log logs/paper.jsonl`
+2. Start dashboard (terminal B):
+   - `python3 -m sidx.monitor.dashboard --log logs/paper.jsonl --port 8765`
+3. Open [http://127.0.0.1:8765](http://127.0.0.1:8765)
+4. Optional Telegram alerts:
+   - set `TELEGRAM_ENABLED=true`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env`
+   - run paper loop with `--telegram`
 
 ## Documentation
 
@@ -52,6 +65,7 @@ If you skip `pip install -e .`, prefix with `PYTHONPATH=.` (see GETTING_STARTED)
 | [GETTING_STARTED.md](GETTING_STARTED.md) | Step-by-step for anyone cloning the repo |
 | [docs/SPEC.md](docs/SPEC.md) | Deriv symbols, contracts, risk defaults, TV parity |
 | [docs/TRADINGVIEW_MAPPING.md](docs/TRADINGVIEW_MAPPING.md) | Pine vs Python |
+| [docs/PHASE1_MONITORING.md](docs/PHASE1_MONITORING.md) | Detailed Telegram + local dashboard setup |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How we update GitHub safely |
 
 ## Disclaimer
