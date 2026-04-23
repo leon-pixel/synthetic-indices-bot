@@ -48,13 +48,24 @@ https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
 
 3. Find `"chat":{"id": ... }` and copy the numeric id.
 
-### C. Put values into `.env`
+### C. Put values into `.env` (exactly what to copy)
 
 ```env
 TELEGRAM_ENABLED=true
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
+TELEGRAM_BOT_TOKEN=1234567890:AAExxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TELEGRAM_CHAT_ID=123456789
 ```
+
+Where these come from:
+
+- `TELEGRAM_BOT_TOKEN`: sent by `@BotFather` when you create the bot via `/newbot`
+- `TELEGRAM_CHAT_ID`: from `getUpdates` response in step B (`"chat":{"id": ... }`)
+
+Notes:
+
+- Personal chat IDs are usually positive numbers
+- Group/channel IDs can be negative (example: `-1001234567890`)
+- Keep the token private; if leaked, regenerate with BotFather
 
 ### D. Run paper bot with alerts
 
@@ -129,6 +140,9 @@ tail -f logs/paper.jsonl
 - Confirm `TELEGRAM_ENABLED=true`
 - Verify bot token/chat id are correct
 - Ensure the bot has received at least one direct message from you
+- Try this in browser to verify token works:
+  - `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getMe`
+- If `getUpdates` is empty, send your bot a message first, then refresh
 
 ### Dashboard shows nothing
 

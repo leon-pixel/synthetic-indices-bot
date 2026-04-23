@@ -57,6 +57,7 @@ If you skip `pip install -e .`, prefix with `PYTHONPATH=.` (see GETTING_STARTED)
 4. Optional Telegram alerts:
    - set `TELEGRAM_ENABLED=true`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env`
    - run paper loop with `--telegram`
+   - detailed setup (BotFather + chat ID): `docs/PHASE1_MONITORING.md`
 
 ## Documentation
 
