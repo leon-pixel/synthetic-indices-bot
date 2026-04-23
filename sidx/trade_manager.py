@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from sidx.config import BotConfig, StrategyConfig
 from sidx.execution import DerivExecution, OrderResult, SimulatedExecution
@@ -38,6 +38,41 @@ class TradeManager:
 
     def has_position(self) -> bool:
         return self.open_pos is not None
+
+    def dump_state(self) -> dict[str, Any]:
+        p = self.open_pos
+        if not p:
+            return {"open_pos": None}
+        return {
+            "open_pos": {
+                "contract_id": p.contract_id,
+                "side": p.side,
+                "entry_price": p.entry_price,
+                "opened_at": p.opened_at.isoformat(),
+                "tp": p.tp,
+                "sl": p.sl,
+                "max_exit_ts": p.max_exit_ts.isoformat(),
+                "stall_check_bars": p.stall_check_bars,
+                "atr_entry": p.atr_entry,
+            }
+        }
+
+    def load_state(self, payload: dict[str, Any]) -> None:
+        op = payload.get("open_pos")
+        if not isinstance(op, dict):
+            self.open_pos = None
+            return
+        self.open_pos = OpenPosition(
+            contract_id=str(op["contract_id"]),
+            side=str(op["side"]),  # type: ignore[arg-type]
+            entry_price=float(op["entry_price"]),
+            opened_at=datetime.fromisoformat(op["opened_at"]),
+            tp=float(op["tp"]),
+            sl=float(op["sl"]),
+            max_exit_ts=datetime.fromisoformat(op["max_exit_ts"]),
+            stall_check_bars=int(op.get("stall_check_bars", self.bot.strategy.min_hold_bars_for_stall)),
+            atr_entry=float(op["atr_entry"]),
+        )
 
     def build_levels(self, side: Side, entry: float, atr_entry: float, strat: StrategyConfig) -> tuple[float, float, int]:
         tp_r = (strat.tp_r_multiple_min + strat.tp_r_multiple_max) / 2.0
@@ -145,6 +180,49 @@ class TradeManager:
                 "pnl_money": pnl_money,
                 "reason": exit_reason,
                 "ts": ts.isoformat(),
+            }
+        )
+        self.open_pos = None
+        return float(pnl_money)
+
+    async def reconcile_open_position(self, ts: datetime) -> float | None:
+        """
+        Broker reconciliation for external closures/restarts.
+        Returns pnl_money if local position was reconciled and closed.
+        """
+        p = self.open_pos
+        if not p:
+            return None
+        getter = getattr(self.execution, "get_open_contract_status", None)
+        if not callable(getter):
+            return None
+        status = await getter(p.contract_id)
+        if not status:
+            return None
+        if status.get("error"):
+            self.logger.log({"event": "reconcile_error", "contract_id": p.contract_id, "error": status.get("error")})
+            return None
+        is_sold = bool(status.get("is_sold", False))
+        if not is_sold:
+            return None
+        sell_price = float(status.get("sell_price", 0) or 0)
+        buy_price = float(status.get("buy_price", p.entry_price) or p.entry_price)
+        if sell_price <= 0:
+            sell_price = buy_price
+        if p.side == "BUY":
+            pnl_money = self.bot.execution.stake * (sell_price - p.entry_price) / max(p.entry_price, 1e-9)
+        else:
+            pnl_money = self.bot.execution.stake * (p.entry_price - sell_price) / max(p.entry_price, 1e-9)
+        self.logger.log(
+            {
+                "event": "closed",
+                "side": p.side,
+                "entry": p.entry_price,
+                "exit": sell_price,
+                "pnl_money": pnl_money,
+                "reason": "reconcile_closed",
+                "ts": ts.isoformat(),
+                "contract_id": p.contract_id,
             }
         )
         self.open_pos = None

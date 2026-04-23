@@ -41,6 +41,12 @@ class SimulatedExecution:
             fill = ask + self.cfg.spread_points / 2 - slip
         return OrderResult(ok=True, contract_id=contract_id, buy_price=float(fill), error=None)
 
+    async def validate_contract_setup(self) -> tuple[bool, str]:
+        return True, "sim_mode_no_contract_validation"
+
+    async def get_open_contract_status(self, contract_id: str) -> dict[str, Any] | None:
+        return {"contract_id": contract_id, "is_sold": False, "status": "sim_open"}
+
 
 class DerivExecution:
     """
@@ -133,6 +139,78 @@ class DerivExecution:
         except Exception as e:
             logger.exception("deriv close failed")
             return OrderResult(False, contract_id, None, str(e))
+
+    async def _proposal_check(self, ctype: str) -> tuple[bool, str]:
+        dur = int(
+            max(
+                self.bot.execution.min_contract_minutes,
+                min(self.bot.execution.contract_duration_minutes, self.bot.execution.max_contract_minutes),
+            )
+        )
+
+        async def inner(ws) -> tuple[bool, str]:
+            req = {
+                "proposal": 1,
+                "amount": float(self.bot.execution.stake),
+                "basis": "stake",
+                "contract_type": ctype,
+                "currency": self.bot.execution.currency,
+                "duration": dur,
+                "duration_unit": "m",
+                "req_id": 90,
+                "symbol": self.bot.deriv.symbol,
+            }
+            await ws.send(json.dumps(req))
+            while True:
+                msg = json.loads(await ws.recv())
+                if msg.get("error"):
+                    return False, str(msg["error"])
+                if msg.get("msg_type") == "proposal":
+                    p = msg.get("proposal") or {}
+                    if p.get("id"):
+                        return True, "ok"
+                    return False, "missing proposal id"
+
+        return await self._with_ws(inner)
+
+    async def validate_contract_setup(self) -> tuple[bool, str]:
+        if not self.bot.deriv.api_token:
+            return False, "missing DERIV_API_TOKEN"
+        try:
+            buy_ok, buy_msg = await self._proposal_check("CALL")
+            sell_ok, sell_msg = await self._proposal_check("PUT")
+            if buy_ok and sell_ok:
+                return True, "proposal validation passed for CALL/PUT"
+            return False, f"proposal validation failed: CALL={buy_msg}; PUT={sell_msg}"
+        except Exception as e:
+            return False, f"proposal validation exception: {e}"
+
+    async def get_open_contract_status(self, contract_id: str) -> dict[str, Any] | None:
+        async def inner(ws) -> dict[str, Any] | None:
+            await ws.send(json.dumps({"proposal_open_contract": 1, "contract_id": contract_id, "req_id": 91}))
+            while True:
+                msg = json.loads(await ws.recv())
+                if msg.get("error"):
+                    return {"error": str(msg["error"]), "contract_id": contract_id}
+                if msg.get("msg_type") == "proposal_open_contract":
+                    poc = msg.get("proposal_open_contract") or {}
+                    if not isinstance(poc, dict):
+                        return None
+                    return {
+                        "contract_id": str(poc.get("contract_id", contract_id)),
+                        "is_sold": bool(poc.get("is_sold", False)),
+                        "is_valid_to_sell": bool(poc.get("is_valid_to_sell", False)),
+                        "status": str(poc.get("status", "")),
+                        "sell_price": float(poc.get("sell_price", 0) or 0),
+                        "buy_price": float(poc.get("buy_price", 0) or 0),
+                        "profit": float(poc.get("profit", 0) or 0),
+                    }
+
+        try:
+            return await self._with_ws(inner)
+        except Exception as e:
+            logger.exception("reconcile failed")
+            return {"error": str(e), "contract_id": contract_id}
 
 
 def make_execution(bot: BotConfig):

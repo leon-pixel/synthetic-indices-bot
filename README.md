@@ -43,6 +43,7 @@ Replace `YOUR_USERNAME` after you fork or create the GitHub repo. Full steps: **
 | Stress (late signals) | add `--latency-bars 2` |
 | Paper stream (needs token) | `python3 -m sidx.bot.run_paper --log logs/paper.jsonl` |
 | Paper stream + Telegram | `python3 -m sidx.bot.run_paper --log logs/paper.jsonl --telegram` |
+| Hardened paper run (Phase 2) | `python3 -m sidx.bot.run_paper --log logs/paper.jsonl --state logs/runtime_state.json --validate-startup --telegram` |
 | Local live dashboard | `python3 -m sidx.monitor.dashboard --log logs/paper.jsonl --port 8765` |
 
 If you skip `pip install -e .`, prefix with `PYTHONPATH=.` (see GETTING_STARTED).
@@ -67,6 +68,7 @@ If you skip `pip install -e .`, prefix with `PYTHONPATH=.` (see GETTING_STARTED)
 | [docs/SPEC.md](docs/SPEC.md) | Deriv symbols, contracts, risk defaults, TV parity |
 | [docs/TRADINGVIEW_MAPPING.md](docs/TRADINGVIEW_MAPPING.md) | Pine vs Python |
 | [docs/PHASE1_MONITORING.md](docs/PHASE1_MONITORING.md) | Detailed Telegram + local dashboard setup |
+| [docs/PHASE2_HARDENING.md](docs/PHASE2_HARDENING.md) | Startup validation, persistence, reconciliation, daily summary |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How we update GitHub safely |
 
 ## Disclaimer

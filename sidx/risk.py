@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 from sidx.config import RiskConfig
 
@@ -75,3 +76,26 @@ class RiskManager:
             self._halt_until_next_day(ts)
         if self.state.consecutive_losses >= self.cfg.max_consecutive_losses:
             self._halt_until_next_day(ts)
+
+    def to_dict(self) -> dict[str, Any]:
+        s = self.state
+        return {
+            "trading_halted_until": s.trading_halted_until.isoformat() if s.trading_halted_until else None,
+            "current_day": s.current_day.isoformat() if s.current_day else None,
+            "trades_today": s.trades_today,
+            "daily_pnl": s.daily_pnl,
+            "consecutive_losses": s.consecutive_losses,
+            "last_trade_ts": s.last_trade_ts.isoformat() if s.last_trade_ts else None,
+            "starting_equity": s.starting_equity,
+        }
+
+    def load_dict(self, payload: dict[str, Any]) -> None:
+        self.state.trading_halted_until = (
+            datetime.fromisoformat(payload["trading_halted_until"]) if payload.get("trading_halted_until") else None
+        )
+        self.state.current_day = date.fromisoformat(payload["current_day"]) if payload.get("current_day") else None
+        self.state.trades_today = int(payload.get("trades_today", 0))
+        self.state.daily_pnl = float(payload.get("daily_pnl", 0.0))
+        self.state.consecutive_losses = int(payload.get("consecutive_losses", 0))
+        self.state.last_trade_ts = datetime.fromisoformat(payload["last_trade_ts"]) if payload.get("last_trade_ts") else None
+        self.state.starting_equity = float(payload.get("starting_equity", self.state.starting_equity))

@@ -64,6 +64,17 @@ class TelegramNotifier:
             return f"Open failed: {record.get('error')} @ {ts}"
         if event == "close_failed":
             return f"Close failed: {record.get('error')} @ {ts}"
+        if event == "startup_validation":
+            return f"Startup validation {'passed' if record.get('ok') else 'failed'}: {record.get('message')}"
+        if event == "daily_summary":
+            return (
+                "Daily summary\n"
+                f"Day: {record.get('day')}\n"
+                f"Opened: {record.get('opened')}  Closed: {record.get('closed')}\n"
+                f"Wins/Losses: {record.get('wins')}/{record.get('losses')}\n"
+                f"Blocked: {record.get('blocked')}\n"
+                f"Net PnL: {record.get('net_pnl')}"
+            )
         return None
 
     def callback(self, record: dict[str, Any]) -> None:
