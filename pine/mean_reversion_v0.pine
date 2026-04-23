@@ -1,0 +1,41 @@
+// @version=5
+strategy("Synth MR v0 (non-authoritative lab)",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=1,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05)
+
+// --- Inputs (keep aligned with docs/TRADINGVIEW_MAPPING.md) ---
+rsiBuyMax   = input.float(30.0, "RSI buy max")
+rsiSellMin  = input.float(70.0, "RSI sell min")
+emaFastLen  = input.int(20, "EMA fast (M1)")
+emaSlowLen  = input.int(50, "EMA slow (M5)")
+atrLen      = input.int(14, "ATR len")
+atrWin      = input.int(288, "ATR percentile window (M1 bars)")
+atrLoQ      = input.float(0.15, "ATR low quantile")
+atrHiQ      = input.float(0.85, "ATR high quantile")
+
+// --- M1 series ---
+ema20  = ta.ema(close, emaFastLen)
+rsi14  = ta.rsi(close, 14)
+atr14  = ta.atr(atrLen)
+atrMin = ta.lowest(atr14, atrWin)
+atrMax = ta.highest(atr14, atrWin)
+atrRank = (atr14 - atrMin) / math.max(atrMax - atrMin, 1e-10)
+atrOk = atrRank >= atrLoQ and atrRank <= atrHiQ
+
+// --- M5 bias ---
+ema50_m5 = request.security(syminfo.tickerid, "5", ta.ema(close, emaSlowLen), lookahead=barmerge.lookahead_off)
+
+buyCond  = atrOk and close > ema50_m5 and low <= ema20 and rsi14 < rsiBuyMax
+sellCond = atrOk and close < ema50_m5 and high >= ema20 and rsi14 > rsiSellMin
+
+if buyCond
+    strategy.entry("Long", strategy.long)
+if sellCond
+    strategy.entry("Short", strategy.short)
+
+// NOTE: exits (TP/SL/time/stall) are intentionally simplified here.
+// The Python bot enforces the mechanical exits described in SPEC / simulation.
