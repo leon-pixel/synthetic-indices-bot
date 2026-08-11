@@ -77,11 +77,9 @@ class StrategyConfig:
 @dataclass(frozen=True)
 class ExecutionConfig:
     mode: str = "sim"
-    contract_duration_minutes: int = 10
-    min_contract_minutes: int = 1
-    max_contract_minutes: int = 10
     currency: str = "USD"
     stake: float = 1.0
+    multiplier: int = 100
     spread_points: float = 0.5
     slippage_points: float = 0.3
     use_kelly: bool = False
@@ -141,15 +139,15 @@ def load_bot_config(dotenv_path: str | None = ".env") -> BotConfig:
         max_hold_minutes=_env_int("MAX_HOLD_MINUTES", 8),
         min_hold_bars_for_stall=_env_int("MIN_HOLD_BARS_FOR_STALL", 3),
         stall_mfe_atr_mult=_env_float("STALL_MFE_ATR_MULT", 0.15),
+        use_trailing_stop=(_env("USE_TRAILING_STOP", "true") or "true").lower() == "true",
+        trailing_atr_mult=_env_float("TRAILING_ATR_MULT", 2.0),
     )
 
     execution = ExecutionConfig(
         mode=mode,
-        contract_duration_minutes=_env_int("CONTRACT_DURATION_MINUTES", 10),
-        min_contract_minutes=_env_int("MIN_CONTRACT_MINUTES", 1),
-        max_contract_minutes=_env_int("MAX_CONTRACT_MINUTES", 10),
         currency=_env("CURRENCY", "USD") or "USD",
         stake=_env_float("STAKE", 1.0),
+        multiplier=_env_int("MULTIPLIER", 100),
         spread_points=_env_float("SPREAD_POINTS", 0.5),
         slippage_points=_env_float("SLIPPAGE_POINTS", 0.3),
         use_kelly=_env("USE_KELLY", "false").lower() == "true",

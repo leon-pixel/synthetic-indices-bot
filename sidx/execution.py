@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -8,38 +7,89 @@ from typing import Any
 
 import websockets
 
-from sidx.config import BotConfig, DerivConnectionConfig, ExecutionConfig
+from sidx.config import BotConfig, ExecutionConfig
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class OrderResult:
+    """Result of opening a position.
+
+    entry_price is the underlying spot reference (NOT money);
+    stake_paid is the money debited for the contract.
+    """
+
     ok: bool
     contract_id: str | None
-    buy_price: float | None
+    entry_price: float | None
+    stake_paid: float | None
+    error: str | None = None
+
+
+@dataclass
+class CloseResult:
+    """Result of closing a position.
+
+    pnl_money is realized profit/loss in account currency.
+    exit_price is the underlying spot at exit when known (sim), else None.
+    """
+
+    ok: bool
+    contract_id: str | None
+    exit_price: float | None
+    pnl_money: float | None
     error: str | None = None
 
 
 class SimulatedExecution:
+    """
+    Models Deriv multiplier PnL: pnl = stake * multiplier * signed price return,
+    with spread/slippage friction applied to entry and exit fills.
+    """
+
     def __init__(self, cfg: ExecutionConfig) -> None:
         self.cfg = cfg
         self._i = 0
 
-    async def open(self, side: str, entry_price: float) -> OrderResult:
+    async def open(
+        self,
+        side: str,
+        entry_price_hint: float,
+        tp_price: float | None = None,
+        sl_price: float | None = None,
+    ) -> OrderResult:
         self._i += 1
         slip = self.cfg.slippage_points if side == "BUY" else -self.cfg.slippage_points
-        fill = entry_price + slip + (self.cfg.spread_points / 2 if side == "BUY" else -self.cfg.spread_points / 2)
-        return OrderResult(ok=True, contract_id=f"sim-{self._i}", buy_price=float(fill), error=None)
+        spread = self.cfg.spread_points / 2 if side == "BUY" else -self.cfg.spread_points / 2
+        fill = entry_price_hint + slip + spread
+        return OrderResult(
+            ok=True,
+            contract_id=f"sim-{self._i}",
+            entry_price=float(fill),
+            stake_paid=float(self.cfg.stake),
+            error=None,
+        )
 
-    async def close(self, contract_id: str, bid: float, ask: float, side: str) -> OrderResult:
-        # exit at adverse side
-        slip = self.cfg.slippage_points if side == "BUY" else -self.cfg.slippage_points
+    async def close(
+        self,
+        contract_id: str,
+        side: str,
+        entry_price: float,
+        stake_paid: float,
+        exit_price: float,
+    ) -> CloseResult:
+        # exit fill: adverse spread/slippage around the determined exit level
         if side == "BUY":
-            fill = bid - self.cfg.spread_points / 2 - slip
+            fill = exit_price - self.cfg.spread_points / 2 - self.cfg.slippage_points
+            ret = (fill - entry_price) / max(entry_price, 1e-9)
         else:
-            fill = ask + self.cfg.spread_points / 2 - slip
-        return OrderResult(ok=True, contract_id=contract_id, buy_price=float(fill), error=None)
+            fill = exit_price + self.cfg.spread_points / 2 + self.cfg.slippage_points
+            ret = (entry_price - fill) / max(entry_price, 1e-9)
+        pnl = stake_paid * float(self.cfg.multiplier) * ret
+        # multiplier contracts cannot lose more than the stake
+        pnl = max(pnl, -stake_paid)
+        return CloseResult(ok=True, contract_id=contract_id, exit_price=float(fill), pnl_money=float(pnl), error=None)
 
     async def validate_contract_setup(self) -> tuple[bool, str]:
         return True, "sim_mode_no_contract_validation"
@@ -50,7 +100,9 @@ class SimulatedExecution:
 
 class DerivExecution:
     """
-    Minimal proposal → buy → sell flow. Contract availability is symbol-specific; errors surface to logs.
+    Multiplier contracts (MULTUP/MULTDOWN): they track the underlying price
+    directly, so strategy TP/SL price levels map cleanly. TP/SL are also
+    attached broker-side via limit_order (converted to money amounts).
     """
 
     def __init__(self, bot: BotConfig) -> None:
@@ -68,86 +120,112 @@ class DerivExecution:
                     raise RuntimeError(str(msg["error"]))
             return await coro(ws)
 
-    async def open(self, side: str, entry_price_hint: float) -> OrderResult:
-        if not self.bot.deriv.api_token:
-            return OrderResult(False, None, None, "missing DERIV_API_TOKEN")
+    def _price_distance_to_money(self, entry: float, target: float) -> float:
+        """Convert a TP/SL price distance into a money amount for limit_order."""
+        ex = self.bot.execution
+        dist = abs(target - entry) / max(entry, 1e-9)
+        return round(ex.stake * ex.multiplier * dist, 2)
 
-        ctype = "CALL" if side == "BUY" else "PUT"
-        dur = int(
-            max(
-                self.bot.execution.min_contract_minutes,
-                min(self.bot.execution.contract_duration_minutes, self.bot.execution.max_contract_minutes),
-            )
-        )
+    def _limit_order(self, entry_hint: float, tp_price: float | None, sl_price: float | None) -> dict[str, float]:
+        out: dict[str, float] = {}
+        if tp_price is not None:
+            tp_money = self._price_distance_to_money(entry_hint, tp_price)
+            if tp_money >= 0.01:
+                out["take_profit"] = tp_money
+        if sl_price is not None:
+            # loss on a multiplier contract is capped at the stake
+            sl_money = min(self._price_distance_to_money(entry_hint, sl_price), round(self.bot.execution.stake, 2))
+            if sl_money >= 0.01:
+                out["stop_loss"] = sl_money
+        return out
+
+    async def open(
+        self,
+        side: str,
+        entry_price_hint: float,
+        tp_price: float | None = None,
+        sl_price: float | None = None,
+    ) -> OrderResult:
+        if not self.bot.deriv.api_token:
+            return OrderResult(False, None, None, None, "missing DERIV_API_TOKEN")
+
+        ctype = "MULTUP" if side == "BUY" else "MULTDOWN"
+        limit_order = self._limit_order(entry_price_hint, tp_price, sl_price)
 
         async def inner(ws) -> OrderResult:
-            req = {
+            req: dict[str, Any] = {
                 "proposal": 1,
                 "amount": float(self.bot.execution.stake),
                 "basis": "stake",
                 "contract_type": ctype,
                 "currency": self.bot.execution.currency,
-                "duration": dur,
-                "duration_unit": "m",
-                "req_id": 1,
+                "multiplier": int(self.bot.execution.multiplier),
                 "symbol": self.bot.deriv.symbol,
+                "req_id": 1,
             }
+            if limit_order:
+                req["limit_order"] = limit_order
             await ws.send(json.dumps(req))
             proposal_id = None
             ask_price = None
+            spot = None
             while True:
                 msg = json.loads(await ws.recv())
                 if msg.get("error"):
-                    return OrderResult(False, None, None, str(msg["error"]))
+                    return OrderResult(False, None, None, None, str(msg["error"]))
                 if msg.get("msg_type") == "proposal":
                     p = msg.get("proposal") or {}
                     proposal_id = p.get("id")
                     ask_price = float(p.get("ask_price", 0) or 0)
+                    spot = float(p.get("spot", 0) or 0)
                     break
             if not proposal_id:
-                return OrderResult(False, None, None, "no proposal id")
+                return OrderResult(False, None, None, None, "no proposal id")
             await ws.send(json.dumps({"buy": proposal_id, "price": ask_price, "req_id": 2}))
             while True:
                 msg = json.loads(await ws.recv())
                 if msg.get("error"):
-                    return OrderResult(False, None, None, str(msg["error"]))
+                    return OrderResult(False, None, None, None, str(msg["error"]))
                 if msg.get("msg_type") == "buy":
                     b = msg.get("buy") or {}
-                    return OrderResult(True, str(b.get("contract_id")), float(b.get("buy_price") or ask_price), None)
-            return OrderResult(False, None, None, "buy timeout")
+                    stake_paid = float(b.get("buy_price") or ask_price or self.bot.execution.stake)
+                    entry_spot = spot if spot else float(entry_price_hint)
+                    return OrderResult(True, str(b.get("contract_id")), entry_spot, stake_paid, None)
 
         try:
             return await self._with_ws(inner)
         except Exception as e:
             logger.exception("deriv open failed")
-            return OrderResult(False, None, None, str(e))
+            return OrderResult(False, None, None, None, str(e))
 
-    async def close(self, contract_id: str, bid: float, ask: float, side: str) -> OrderResult:
-        async def inner(ws) -> OrderResult:
-            await ws.send(json.dumps({"sell": contract_id, "req_id": 3}))
+    async def close(
+        self,
+        contract_id: str,
+        side: str,
+        entry_price: float,
+        stake_paid: float,
+        exit_price: float,
+    ) -> CloseResult:
+        async def inner(ws) -> CloseResult:
+            # price 0 = sell at market
+            await ws.send(json.dumps({"sell": contract_id, "price": 0, "req_id": 3}))
             while True:
                 msg = json.loads(await ws.recv())
                 if msg.get("error"):
-                    return OrderResult(False, contract_id, None, str(msg["error"]))
+                    return CloseResult(False, contract_id, None, None, str(msg["error"]))
                 if msg.get("msg_type") == "sell":
                     s = msg.get("sell") or {}
-                    return OrderResult(True, contract_id, float(s.get("sold_for") or 0), None)
-            return OrderResult(False, contract_id, None, "sell timeout")
+                    sold_for = float(s.get("sold_for") or 0)
+                    pnl = sold_for - float(stake_paid)
+                    return CloseResult(True, contract_id, None, pnl, None)
 
         try:
             return await self._with_ws(inner)
         except Exception as e:
             logger.exception("deriv close failed")
-            return OrderResult(False, contract_id, None, str(e))
+            return CloseResult(False, contract_id, None, None, str(e))
 
     async def _proposal_check(self, ctype: str) -> tuple[bool, str]:
-        dur = int(
-            max(
-                self.bot.execution.min_contract_minutes,
-                min(self.bot.execution.contract_duration_minutes, self.bot.execution.max_contract_minutes),
-            )
-        )
-
         async def inner(ws) -> tuple[bool, str]:
             req = {
                 "proposal": 1,
@@ -155,10 +233,9 @@ class DerivExecution:
                 "basis": "stake",
                 "contract_type": ctype,
                 "currency": self.bot.execution.currency,
-                "duration": dur,
-                "duration_unit": "m",
-                "req_id": 90,
+                "multiplier": int(self.bot.execution.multiplier),
                 "symbol": self.bot.deriv.symbol,
+                "req_id": 90,
             }
             await ws.send(json.dumps(req))
             while True:
@@ -177,11 +254,11 @@ class DerivExecution:
         if not self.bot.deriv.api_token:
             return False, "missing DERIV_API_TOKEN"
         try:
-            buy_ok, buy_msg = await self._proposal_check("CALL")
-            sell_ok, sell_msg = await self._proposal_check("PUT")
+            buy_ok, buy_msg = await self._proposal_check("MULTUP")
+            sell_ok, sell_msg = await self._proposal_check("MULTDOWN")
             if buy_ok and sell_ok:
-                return True, "proposal validation passed for CALL/PUT"
-            return False, f"proposal validation failed: CALL={buy_msg}; PUT={sell_msg}"
+                return True, f"multiplier proposal validation passed (x{self.bot.execution.multiplier})"
+            return False, f"multiplier proposal validation failed: MULTUP={buy_msg}; MULTDOWN={sell_msg}"
         except Exception as e:
             return False, f"proposal validation exception: {e}"
 

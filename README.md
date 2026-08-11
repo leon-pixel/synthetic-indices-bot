@@ -9,9 +9,10 @@ Mean-reversion style bot for **Deriv synthetic indices**: shared tick → candle
 ## Features
 
 - M1 + M5 indicators (EMA, RSI, ATR regime), rule-based signals with reason codes
-- Simulated execution with spread/slippage knobs; optional Deriv `proposal` / `buy` / `sell`
+- **Multiplier contract execution** (`MULTUP`/`MULTDOWN`) with broker-side TP/SL safety net; simulated execution uses the identical PnL model (see `docs/PHASE3_MULTIPLIERS.md`)
 - Risk manager: session window, cooldown, daily loss, consecutive losses, kill switch
-- Research CLI: CSV or `--fetch` ticks, `--walk-forward`, `--latency-bars` stress
+- Research CLI: CSV ticks, `--fetch` recent ticks, `--fetch-candles --days N` (90+ days of real M1 history, no token needed), `--walk-forward`, `--latency-bars` stress
+- Pytest suite + GitHub Actions CI (Python 3.9 / 3.11 + smoke backtest)
 - Optional TradingView Pine lab + mapping doc (non-authoritative vs Deriv ticks)
 
 ## Requirements
@@ -38,8 +39,10 @@ Replace `YOUR_USERNAME` after you fork or create the GitHub repo. Full steps: **
 | Goal | Command |
 |------|---------|
 | Backtest (offline sample) | `python3 -m sidx.research.run_backtest --csv testdata/sample_ticks.csv --out-dir reports/run1` |
-| Fetch ticks from Deriv | `python3 -m sidx.research.run_backtest --fetch --n-ticks 50000 --out-dir reports/from_deriv` |
+| **Backtest on real history** | `python3 -m sidx.research.run_backtest --fetch-candles --days 30 --out-dir reports/validation` |
+| Fetch recent ticks (~24h max) | `python3 -m sidx.research.run_backtest --fetch --n-ticks 50000 --out-dir reports/from_deriv` |
 | Walk-forward + RSI grid | add `--walk-forward 4` |
+| Run unit tests | `pip install -r requirements-dev.txt && pytest -q` |
 | Stress (late signals) | add `--latency-bars 2` |
 | Paper stream (needs token) | `python3 -m sidx.bot.run_paper --log logs/paper.jsonl` |
 | Paper stream + Telegram | `python3 -m sidx.bot.run_paper --log logs/paper.jsonl --telegram` |
@@ -69,6 +72,7 @@ If you skip `pip install -e .`, prefix with `PYTHONPATH=.` (see GETTING_STARTED)
 | [docs/TRADINGVIEW_MAPPING.md](docs/TRADINGVIEW_MAPPING.md) | Pine vs Python |
 | [docs/PHASE1_MONITORING.md](docs/PHASE1_MONITORING.md) | Detailed Telegram + local dashboard setup |
 | [docs/PHASE2_HARDENING.md](docs/PHASE2_HARDENING.md) | Startup validation, persistence, reconciliation, daily summary |
+| [docs/PHASE3_MULTIPLIERS.md](docs/PHASE3_MULTIPLIERS.md) | Multiplier contracts, corrected PnL, real-data validation, tests + CI |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How we update GitHub safely |
 
 ## Disclaimer

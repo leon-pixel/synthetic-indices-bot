@@ -41,3 +41,18 @@ def m1_m5_from_ticks(ticks: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     m1 = ticks_to_ohlcv(ticks, "1min")
     m5 = ticks_to_ohlcv(ticks, "5min")
     return m1, m5
+
+
+def m5_from_m1(m1: pd.DataFrame) -> pd.DataFrame:
+    """Deterministic M5 OHLCV from M1 bars (for candle-based history fetches)."""
+    r = m1.resample("5min", label="left", closed="left")
+    out = pd.DataFrame(
+        {
+            "open": r["open"].first(),
+            "high": r["high"].max(),
+            "low": r["low"].min(),
+            "close": r["close"].last(),
+            "volume": r["volume"].sum(),
+        }
+    )
+    return out.dropna(subset=["open", "high", "low", "close"], how="any")

@@ -42,12 +42,11 @@ def _slip_exec(side: str, price: float, slip: float, spread: float) -> float:
     return float(price + s + sp)
 
 
-def _exit_fill(side: str, bid: float, ask: float, slip: float, spread: float) -> float:
-    # Use close price for exit fill (more realistic than high/low)
-    # For BUY: exit at bid (we're selling), for SELL: exit at ask (we're buying)
+def _exit_fill(side: str, exit_px: float, slip: float, spread: float) -> float:
+    # fill at the determined exit level with adverse spread/slippage
     if side == "BUY":
-        return float(bid - spread / 2.0 - slip)
-    return float(ask + spread / 2.0 - slip)
+        return float(exit_px - spread / 2.0 - slip)
+    return float(exit_px + spread / 2.0 + slip)
 
 
 def _update_trailing_stop(
@@ -171,13 +170,14 @@ def simulate_backtest(
                     exit_px, exit_reason = c, "stall_exit"
 
             if exit_px is not None:
-                # Use close price for more realistic exit
-                fill = c
-                # Apply spread and slippage to fill
+                fill = _exit_fill(pos.side, exit_px, ex.slippage_points, ex.spread_points)
+                # multiplier-contract PnL: stake * multiplier * signed price return,
+                # loss capped at the stake (matches Deriv MULTUP/MULTDOWN)
                 if pos.side == "BUY":
-                    pnl_money = pos.stake * (fill - pos.entry_price) / max(pos.entry_price, 1e-9)
+                    ret = (fill - pos.entry_price) / max(pos.entry_price, 1e-9)
                 else:
-                    pnl_money = pos.stake * (pos.entry_price - fill) / max(pos.entry_price, 1e-9)
+                    ret = (pos.entry_price - fill) / max(pos.entry_price, 1e-9)
+                pnl_money = max(pos.stake * float(ex.multiplier) * ret, -pos.stake)
                 risk.register_exit(ts, pnl_money)
                 completed.append(
                     {

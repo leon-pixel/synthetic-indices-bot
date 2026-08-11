@@ -30,8 +30,14 @@ def main() -> None:
     setup_logging()
     ap = argparse.ArgumentParser(description="Backtest / walk-forward for sidx")
     ap.add_argument("--csv", type=str, default="", help="Ticks CSV (epoch,price)")
-    ap.add_argument("--fetch", action="store_true", help="Fetch ticks from Deriv (needs DERIV_API_TOKEN)")
+    ap.add_argument("--fetch", action="store_true", help="Fetch recent ticks from Deriv (~last 24h only)")
     ap.add_argument("--n-ticks", type=int, default=50_000)
+    ap.add_argument(
+        "--fetch-candles",
+        action="store_true",
+        help="Fetch M1 candle history from Deriv (goes back 90+ days; preferred for validation)",
+    )
+    ap.add_argument("--days", type=int, default=30, help="Days of M1 candles for --fetch-candles")
     ap.add_argument("--walk-forward", type=int, default=0, help="Number of folds (0=disabled)")
     ap.add_argument("--latency-bars", type=int, default=0, help="Stress: shift features by N M1 bars")
     ap.add_argument("--out-dir", type=str, default="reports")
@@ -43,20 +49,29 @@ def main() -> None:
 
     bot = load_bot_config(args.dotenv)
 
-    ticks: pd.DataFrame
-    if args.csv:
-        ticks = _load_ticks_csv(Path(args.csv))
-    elif args.fetch:
-        if not bot.deriv.api_token:
-            raise SystemExit("DERIV_API_TOKEN required for --fetch")
-        from sidx.data.ticks_history import fetch_ticks_history_paginated_sync
+    n_ticks = 0
+    if args.fetch_candles:
+        # Deriv history is public data; no token needed
+        from sidx.data.candles import m5_from_m1
+        from sidx.data.ticks_history import fetch_candles_history_paginated_sync
 
-        ticks = fetch_ticks_history_paginated_sync(bot.deriv, int(args.n_ticks))
-        ticks.to_csv(out_dir / "ticks_cache.csv", index=False)
+        m1 = fetch_candles_history_paginated_sync(bot.deriv, int(args.days) * 1440, granularity=60)
+        m1.to_csv(out_dir / "m1_cache.csv")
+        m5 = m5_from_m1(m1)
     else:
-        raise SystemExit("Provide --csv ticks.csv or --fetch")
+        ticks: pd.DataFrame
+        if args.csv:
+            ticks = _load_ticks_csv(Path(args.csv))
+        elif args.fetch:
+            from sidx.data.ticks_history import fetch_ticks_history_paginated_sync
 
-    m1, m5 = m1_m5_from_ticks(ticks)
+            ticks = fetch_ticks_history_paginated_sync(bot.deriv, int(args.n_ticks))
+            ticks.to_csv(out_dir / "ticks_cache.csv", index=False)
+        else:
+            raise SystemExit("Provide --csv ticks.csv, --fetch, or --fetch-candles")
+        n_ticks = len(ticks)
+        m1, m5 = m1_m5_from_ticks(ticks)
+
     feats = prepare_feature_frame(m1, m5, bot.strategy)
     if int(args.latency_bars) > 0:
         feats = stress_latency(feats, int(args.latency_bars))
@@ -64,7 +79,7 @@ def main() -> None:
     report: dict = {
         "params_hash": params_hash(bot),
         "strategy_params_hash": params_hash(bot.strategy),
-        "rows_ticks": int(len(ticks)),
+        "rows_ticks": int(n_ticks),
         "rows_m1": int(len(feats)),
     }
 
