@@ -86,7 +86,8 @@ class SimulatedExecution:
         else:
             fill = exit_price + self.cfg.spread_points / 2 + self.cfg.slippage_points
             ret = (entry_price - fill) / max(entry_price, 1e-9)
-        pnl = stake_paid * float(self.cfg.multiplier) * ret
+        notional = stake_paid * float(self.cfg.multiplier)
+        pnl = notional * ret - notional * self.cfg.commission_rate
         # multiplier contracts cannot lose more than the stake
         pnl = max(pnl, -stake_paid)
         return CloseResult(ok=True, contract_id=contract_id, exit_price=float(fill), pnl_money=float(pnl), error=None)

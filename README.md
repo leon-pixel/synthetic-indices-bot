@@ -73,6 +73,7 @@ If you skip `pip install -e .`, prefix with `PYTHONPATH=.` (see GETTING_STARTED)
 | [docs/PHASE1_MONITORING.md](docs/PHASE1_MONITORING.md) | Detailed Telegram + local dashboard setup |
 | [docs/PHASE2_HARDENING.md](docs/PHASE2_HARDENING.md) | Startup validation, persistence, reconciliation, daily summary |
 | [docs/PHASE3_MULTIPLIERS.md](docs/PHASE3_MULTIPLIERS.md) | Multiplier contracts, corrected PnL, real-data validation, tests + CI |
+| [docs/VALIDATION_FINDINGS.md](docs/VALIDATION_FINDINGS.md) | **Read this first:** does the edge survive real commission? (Spoiler: no) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How we update GitHub safely |
 
 ## Disclaimer

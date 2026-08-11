@@ -80,6 +80,10 @@ class ExecutionConfig:
     currency: str = "USD"
     stake: float = 1.0
     multiplier: int = 100
+    # One-time commission charged at open, as a fraction of notional (stake x multiplier).
+    # Deriv client fees per symbol (derived from partner tables, 2026): R_10 0.0000375,
+    # R_25 0.0000875, R_50 0.0001875, R_75 0.00025, R_100 0.000375.
+    commission_rate: float = 0.00025
     spread_points: float = 0.5
     slippage_points: float = 0.3
     use_kelly: bool = False
@@ -148,6 +152,7 @@ def load_bot_config(dotenv_path: str | None = ".env") -> BotConfig:
         currency=_env("CURRENCY", "USD") or "USD",
         stake=_env_float("STAKE", 1.0),
         multiplier=_env_int("MULTIPLIER", 100),
+        commission_rate=_env_float("COMMISSION_RATE", 0.00025),
         spread_points=_env_float("SPREAD_POINTS", 0.5),
         slippage_points=_env_float("SLIPPAGE_POINTS", 0.3),
         use_kelly=_env("USE_KELLY", "false").lower() == "true",

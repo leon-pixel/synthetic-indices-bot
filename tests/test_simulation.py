@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from sidx.config import BotConfig, DerivConnectionConfig, ExecutionConfig, StrategyConfig
 from sidx.data.candles import m1_m5_from_ticks
@@ -7,11 +8,11 @@ from sidx.research.simulation import simulate_backtest, stress_latency, summariz
 from sidx.strategy import prepare_feature_frame
 
 
-def _bot(**strat_overrides) -> BotConfig:
+def _bot(commission_rate: float = 0.0, **strat_overrides) -> BotConfig:
     return BotConfig(
         deriv=DerivConnectionConfig(api_token=""),
         strategy=StrategyConfig(**strat_overrides),
-        execution=ExecutionConfig(mode="sim", stake=1.0, multiplier=100),
+        execution=ExecutionConfig(mode="sim", stake=1.0, multiplier=100, commission_rate=commission_rate),
     )
 
 
@@ -66,6 +67,13 @@ def test_simulation_loss_capped_at_stake():
     ledger = simulate_backtest(df, _bot())
     assert len(ledger) == 1
     assert ledger.iloc[0]["pnl_money"] >= -1.0  # never lose more than the stake
+
+
+def test_commission_subtracted_per_trade():
+    gross = simulate_backtest(_features_with_buy_setup(), _bot(commission_rate=0.0))
+    net = simulate_backtest(_features_with_buy_setup(), _bot(commission_rate=0.00025))
+    # notional = 1 * 100 -> commission $0.025 per trade
+    assert net.iloc[0]["pnl_money"] == pytest.approx(gross.iloc[0]["pnl_money"] - 0.025)
 
 
 def test_summarize_empty():

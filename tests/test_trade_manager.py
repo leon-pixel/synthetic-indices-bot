@@ -11,7 +11,9 @@ from sidx.trade_manager import TradeManager
 
 T0 = datetime(2026, 1, 5, 10, 0, tzinfo=timezone.utc)
 
-EXEC = ExecutionConfig(mode="sim", stake=1.0, multiplier=100, spread_points=0.5, slippage_points=0.3)
+EXEC = ExecutionConfig(
+    mode="sim", stake=1.0, multiplier=100, commission_rate=0.0, spread_points=0.5, slippage_points=0.3
+)
 
 
 def _bot(strategy: StrategyConfig) -> BotConfig:
@@ -116,6 +118,22 @@ def test_sell_side_take_profit(tmp_path):
     pnl = asyncio.run(tm.on_bar(T0 + timedelta(minutes=1), 99.0, 99.3, 98.0, 98.5, 1))
     assert pnl is not None and pnl > 0
     assert _last_event(tm)["reason"] == "take_profit"
+
+
+def test_commission_reduces_pnl(tmp_path):
+    bot = BotConfig(
+        deriv=DerivConnectionConfig(api_token=""),
+        strategy=NO_TRAIL,
+        execution=ExecutionConfig(
+            mode="sim", stake=1.0, multiplier=100, commission_rate=0.00025, spread_points=0.5, slippage_points=0.3
+        ),
+    )
+    logger = JsonlLogger(tmp_path / "test.jsonl", strategy_version="test")
+    tm = TradeManager(bot, logger, SimulatedExecution(bot.execution))
+    asyncio.run(tm.try_open("BUY", 100.0, 1.0, T0))
+    pnl = asyncio.run(tm.on_bar(T0 + timedelta(minutes=1), 101.0, 102.0, 100.6, 101.9, 1))
+    gross = 100 * (101.25 - 100.55) / 100.55
+    assert pnl == pytest.approx(gross - 100 * 0.00025)
 
 
 def test_state_roundtrip(tmp_path):

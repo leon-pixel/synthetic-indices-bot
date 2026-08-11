@@ -172,12 +172,14 @@ def simulate_backtest(
             if exit_px is not None:
                 fill = _exit_fill(pos.side, exit_px, ex.slippage_points, ex.spread_points)
                 # multiplier-contract PnL: stake * multiplier * signed price return,
-                # loss capped at the stake (matches Deriv MULTUP/MULTDOWN)
+                # minus one-time commission on notional, loss capped at the stake
+                # (matches Deriv MULTUP/MULTDOWN)
                 if pos.side == "BUY":
                     ret = (fill - pos.entry_price) / max(pos.entry_price, 1e-9)
                 else:
                     ret = (pos.entry_price - fill) / max(pos.entry_price, 1e-9)
-                pnl_money = max(pos.stake * float(ex.multiplier) * ret, -pos.stake)
+                notional = pos.stake * float(ex.multiplier)
+                pnl_money = max(notional * ret - notional * ex.commission_rate, -pos.stake)
                 risk.register_exit(ts, pnl_money)
                 completed.append(
                     {

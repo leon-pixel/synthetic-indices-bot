@@ -38,6 +38,8 @@ def main() -> None:
         help="Fetch M1 candle history from Deriv (goes back 90+ days; preferred for validation)",
     )
     ap.add_argument("--days", type=int, default=30, help="Days of M1 candles for --fetch-candles")
+    ap.add_argument("--m1-csv", type=str, default="", help="Reuse a cached m1_cache.csv instead of fetching")
+    ap.add_argument("--symbol", type=str, default="", help="Override DERIV_SYMBOL (e.g. R_10, R_100)")
     ap.add_argument("--walk-forward", type=int, default=0, help="Number of folds (0=disabled)")
     ap.add_argument("--latency-bars", type=int, default=0, help="Stress: shift features by N M1 bars")
     ap.add_argument("--out-dir", type=str, default="reports")
@@ -48,9 +50,19 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     bot = load_bot_config(args.dotenv)
+    if args.symbol:
+        from dataclasses import replace
+
+        bot = replace(bot, deriv=replace(bot.deriv, symbol=args.symbol))
 
     n_ticks = 0
-    if args.fetch_candles:
+    if args.m1_csv:
+        from sidx.data.candles import m5_from_m1
+
+        m1 = pd.read_csv(Path(args.m1_csv), index_col=0, parse_dates=True)
+        m1.index = pd.to_datetime(m1.index, utc=True)
+        m5 = m5_from_m1(m1)
+    elif args.fetch_candles:
         # Deriv history is public data; no token needed
         from sidx.data.candles import m5_from_m1
         from sidx.data.ticks_history import fetch_candles_history_paginated_sync
@@ -77,6 +89,8 @@ def main() -> None:
         feats = stress_latency(feats, int(args.latency_bars))
 
     report: dict = {
+        "symbol": bot.deriv.symbol,
+        "commission_rate": bot.execution.commission_rate,
         "params_hash": params_hash(bot),
         "strategy_params_hash": params_hash(bot.strategy),
         "rows_ticks": int(n_ticks),
